@@ -1,138 +1,76 @@
 # Evaluación experimental de desempeño
 
-Cómputo Paralelo y en la Nube — Proyecto Apertura: DBSCAN paralelo con OpenMP.
-Autor: Jorge Daniel Lafarga Axotla. Datos: `results/experimentos.csv`. Código: `src/dbscan.cpp`.
+Cómputo Paralelo y en la Nube — Proyecto Apertura: DBSCAN paralelo con OpenMP. Autor del proyecto: Jorge Daniel Lafarga Axotla. Los datos de esta página corresponden a la corrida del 19 de octubre de 2026 en la rama `prueba`.
 
-## 1. Definición del experimento
+## Diseño del experimento
 
-**Versiones comparadas.** Serial (toda la matriz como una sola región) y dos paralelas que dividen el plano en `k` regiones: *franjas* (k tiras verticales) y *malla* (celdas casi cuadradas). Ver `docs/1_descripcion_codigo.md`.
+Se compararon la versión serial y las versiones paralelas por franjas y por malla. Las versiones paralelas se ejecutaron con `k = {2, 4, 8, 16, 32, 64}` regiones, `N = {20000, 40000, 80000, 120000, 140000, 160000, 180000, 200000}` puntos y `hilos = {1, 8, 16, 32}`. Estos últimos valores son, respectivamente, 1, la mitad, el total y el doble de los 16 procesadores lógicos disponibles. Cada configuración se repitió diez veces: 3,840 corridas paralelas y 80 seriales.
 
-**Parámetros del experimento.**
+Los CSV de entrada se generaron para cada `N` con los parámetros de `data/DBSCAN_noise.ipynb`: `make_blobs`, cuatro centros, `cluster_std = 0.06`, `random_state = 11`, `center_box = (0, 1.0)`, coordenadas positivas intercambiadas y redondeadas a tres decimales. El algoritmo usa `ε = 0.03` y `min_samples = 10`. Los archivos `data/<N>_data.csv` y `data/<N>_results.csv` se dejaron en el directorio de trabajo; `data/*.csv` está excluido de Git. Cada CSV de salida contiene `x,y,etiqueta`, con `0` para ruido, `1` para core y `2` para core de segundo orden, en el formato que lee la libreta.
 
-| Parámetro | Valores |
+`build/dbscan --bench data results/experimentos.csv` midió con `omp_get_wtime` la ejecución del algoritmo, incluida la construcción de las regiones en las versiones paralelas, pero sin incluir la lectura del CSV. El programa comprobó en cada corrida que las etiquetas coincidieran con la versión serial; las 3,920 corridas terminaron sin diferencias. `scripts/graficas.py` calculó las medias por configuración y generó las gráficas. Se usaron estas métricas:
+
+- Speedup contra serial: tiempo medio serial para el mismo `N` dividido entre el tiempo medio de la configuración paralela.
+- Speedup por hilos: tiempo medio de la misma versión, `k` y `N` con un hilo dividido entre su tiempo medio con `h` hilos.
+
+El primer cociente incluye la ganancia por dividir los datos en regiones, incluso con un solo hilo. El segundo aísla el efecto de cambiar la cantidad de hilos.
+
+## Equipo y compilación
+
+| Componente | Configuración de esta corrida |
 |---|---|
-| k (divisiones) | 2, 4, 8, 16, 32, 64 |
-| Número de puntos | 20000, 40000, 80000, 120000, 140000, 160000, 180000, 200000 |
-| Hilos | 1, 4, 8, 16 (1, cores virtuales/2, cores virtuales y cores virtuales × 2, con 8 cores virtuales) |
-| Iteraciones por configuración | 10 (se promedian) |
+| CPU | Intel Core i5-14450HX, 16 procesadores lógicos visibles (`nproc`) |
+| RAM | 15 GiB; 7.6 GiB de swap |
+| Sistema | Bazzite 44, kernel `7.2.9-ogc3.1.fc44.x86_64` |
+| Compilador | GCC 16.2.1, C++17 y OpenMP |
+| Opciones de compilación | `-O3 -march=native -std=c++17 -fopenmp -Wall -Wextra` |
 
-La versión serial se ejecuta una vez por cada tamaño (10 iteraciones). Cada versión paralela se ejecuta en las 6 × 4 combinaciones de k e hilos para cada tamaño: en total 3,840 corridas paralelas y 80 seriales.
+## Resultados
 
-**Datos de entrada.** Puntos aleatorios generados con el código de `DBSCAN_noise.ipynb` (`make_blobs` con 4 centros, `cluster_std = 0.06`, `random_state = 11`, coordenadas en valor absoluto y redondeadas a 3 decimales). Parámetros de DBSCAN: ε = 0.03, `min_samples` = 10. Con 20,000 puntos se detectan 45 puntos de ruido.
+Las siguientes cifras son medias de diez iteraciones. El mejor speedup de cada versión para cada tamaño fue:
 
-**Qué se mide.** Tiempo de pared (`omp_get_wtime`) de la ejecución del algoritmo, incluyendo la construcción de la partición y las regiones en las versiones paralelas, y excluyendo la lectura del archivo. Por cada configuración se reportan las 10 iteraciones y su media.
+| N | Serial (s) | Franjas: mejor speedup (k, hilos) | Malla: mejor speedup (k, hilos) |
+|---:|---:|---:|---:|
+| 20,000 | 0.0158 | 25.41 (32, 32) | 31.15 (64, 16) |
+| 40,000 | 0.0341 | 30.95 (32, 16) | 34.23 (64, 16) |
+| 80,000 | 0.0723 | 30.96 (32, 32) | 36.14 (64, 16) |
+| 120,000 | 0.1155 | 33.28 (32, 32) | 38.54 (64, 32) |
+| 140,000 | 0.1384 | 31.70 (32, 16) | 37.79 (64, 32) |
+| 160,000 | 0.1566 | 33.59 (32, 32) | 38.83 (64, 16) |
+| 180,000 | 0.1786 | 33.78 (32, 16) | 37.77 (32, 32) |
+| 200,000 | 0.1959 | 33.46 (32, 32) | 39.06 (64, 16) |
 
-**Métricas.**
+Para `N = 200,000`, los speedups contra serial de **todas** las configuraciones fueron:
 
-- *Speedup contra la serial* = tiempo medio serial (mismo N) / tiempo medio de la configuración.
-- *Speedup contra 1 hilo* = tiempo medio de la misma versión, k y N con 1 hilo / tiempo medio con h hilos.
+| k | Franjas 1 | Franjas 8 | Franjas 16 | Franjas 32 | Malla 1 | Malla 8 | Malla 16 | Malla 32 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2 | 1.80 | 3.40 | 3.43 | 3.45 | 1.81 | 3.47 | 3.44 | 3.43 |
+| 4 | 2.99 | 5.94 | 5.82 | 5.96 | 2.70 | 5.83 | 5.98 | 5.98 |
+| 8 | 4.49 | 13.08 | 12.97 | 12.90 | 4.47 | 13.66 | 13.93 | 13.95 |
+| 16 | 5.78 | 23.05 | 21.21 | 22.13 | 6.08 | 20.43 | 20.07 | 21.13 |
+| 32 | 5.61 | 30.12 | 31.85 | 33.46 | 6.80 | 30.46 | 35.04 | 35.28 |
+| 64 | 3.89 | 22.34 | 29.78 | 28.07 | 6.08 | 30.56 | 39.06 | 31.48 |
 
-Se separan porque la versión paralela con 1 hilo ya es más rápida que la serial: dividir en regiones acorta las listas de puntos que se comparan, aunque no haya paralelismo. El primer speedup mide el efecto total; el segundo, solo el de los hilos.
-
-**Corrección.** En cada configuración se verifica que las etiquetas sean idénticas a las de la serial; el programa se detiene si no lo son. Esto no ocurrió en ninguna corrida.
-
-## 2. Equipo
-
-| | |
-|---|---|
-| CPU | Intel Core i5-9300H @ 2.40 GHz |
-| Cores / hilos | 4 cores físicos, 2 hilos por core: 8 cores virtuales, 1 socket |
-| Caché | L2: 1 MiB en total (4 instancias, 256 KiB por core); L3: 8 MiB |
-| RAM | (completar con la salida de `free -h`) |
-| Sistema operativo | Ubuntu 24.04 sobre WSL2 (kernel 6.18.54.1-microsoft-standard-WSL2), en Windows |
-| Compilador | g++ 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1) |
-| Banderas | `-O3 -march=native -std=c++17 -fopenmp -Wall -Wextra` |
-| Paralelismo | OpenMP |
-
-## 3. Resultados
-
-Speedup contra la serial con N = 200,000 (tiempo serial medio: 0.3366 s):
-
-| k | franjas 1 | franjas 4 | franjas 8 | franjas 16 | malla 1 | malla 4 | malla 8 | malla 16 |
-|---|---|---|---|---|---|---|---|---|
-| 2 | 1.90 | 3.37 | 3.14 | 3.14 | 1.35 | 2.72 | 3.09 | 3.24 |
-| 4 | 3.20 | 5.97 | 4.85 | 5.68 | 2.96 | 5.30 | 5.43 | 5.44 |
-| 8 | 4.73 | 12.08 | 10.37 | 11.15 | 4.74 | 10.61 | 10.65 | 10.82 |
-| 16 | 5.12 | 12.10 | 11.04 | 14.49 | 6.23 | 15.14 | 13.86 | 14.46 |
-| 32 | 5.00 | 11.70 | 9.50 | 13.87 | 6.94 | 17.13 | 17.66 | 18.93 |
-| 64 | 2.46 | 8.25 | 7.66 | 8.70 | 5.83 | 15.41 | 14.99 | 16.86 |
-
-(Columnas: versión y número de hilos.)
-
-Speedup contra 1 hilo (misma versión y k) con N = 200,000:
-
-| k | franjas 1 | franjas 4 | franjas 8 | franjas 16 | malla 1 | malla 4 | malla 8 | malla 16 |
-|---|---|---|---|---|---|---|---|---|
-| 2 | 1.00 | 1.78 | 1.65 | 1.65 | 1.00 | 2.02 | 2.29 | 2.40 |
-| 4 | 1.00 | 1.86 | 1.51 | 1.77 | 1.00 | 1.79 | 1.84 | 1.84 |
-| 8 | 1.00 | 2.55 | 2.19 | 2.36 | 1.00 | 2.24 | 2.25 | 2.28 |
-| 16 | 1.00 | 2.36 | 2.16 | 2.83 | 1.00 | 2.43 | 2.22 | 2.32 |
-| 32 | 1.00 | 2.34 | 1.90 | 2.77 | 1.00 | 2.47 | 2.54 | 2.73 |
-| 64 | 1.00 | 3.36 | 3.12 | 3.54 | 1.00 | 2.65 | 2.57 | 2.89 |
-
-Gráficas:
+El speedup máximo del experimento fue **39.06**, obtenido por malla con `N = 200,000`, `k = 64` y 16 hilos. Su tiempo medio fue 0.005016 s, frente a 0.195932 s de la serial. Franjas alcanzó un máximo de **33.46** con `N = 200,000`, `k = 32` y 32 hilos, en 0.005855 s. Ambas superan el umbral de 1.5 indicado en la nota del enunciado.
 
 ![Speedup contra la serial según el número de puntos](../results/speedup_vs_n.png)
 
-![Escalamiento por hilos con N = 200,000](../results/speedup_vs_hilos.png)
+![Speedup al cambiar el número de hilos con N = 200,000](../results/speedup_vs_hilos.png)
 
 ![Cociente de tiempos franjas / malla con N = 200,000](../results/franjas_vs_malla.png)
 
-## 4. Interpretación y análisis
+## Interpretación y límites
 
-### 4.1 Cumplimiento del requisito de speedup
+La partición también acelera con un solo hilo. Por ejemplo, para `N = 200,000` y `k = 32`, el speedup con un hilo es 5.61 en franjas y 6.80 en malla; esa ganancia proviene del menor número de candidatos comparados por punto. Para esta configuración, pasar de 1 a 16 hilos aporta otros factores de 5.68 y 5.15, respectivamente. Por ello, el speedup contra serial no debe atribuirse íntegramente a OpenMP.
 
-Ambas versiones superan ampliamente el speedup de 1.5 que pide la NOTA 1. El máximo de todo el experimento es 25.14. Con N = 200,000, el mejor resultado de franjas es 14.49 (k = 16, 16 hilos) y el de malla, 18.93 (k = 32, 16 hilos).
+`k = 2` crea solo dos regiones y ofrece poco trabajo paralelo. Para `k = 64`, la malla rinde mejor que las franjas en esta entrada: con 16 hilos obtiene 39.06 frente a 29.78. Las franjas angostas requieren halos relativamente grandes; la malla conserva regiones más compactas. Más hilos no garantizan mejores tiempos: con malla y `k = 64`, el speedup baja de 39.06 con 16 hilos a 31.48 con 32.
 
-### 4.2 Dos efectos: partición e hilos
+Se midió una sola semilla, una distribución fija y un solo equipo, sin calentamiento previo. Las diferencias pequeñas pueden reflejar variación del sistema. Además, las mediciones excluyen la lectura de entrada y la escritura de resultados; el experimento caracteriza el cálculo, no el tiempo total de un flujo de archivos.
 
-Con 1 hilo las versiones paralelas ya son entre 2.5 y 7 veces más rápidas que la serial para k ≥ 8 (por ejemplo, malla con k = 32: 6.94). No es paralelismo: es el efecto de dividir. Cada región compara cada punto contra una lista corta (sus puntos más el halo) en vez de contra los n puntos, y esas listas se guardan contiguas en memoria y, al crecer k, son lo bastante pequeñas para aprovechar mejor la caché (L2 de 256 KiB por core), mientras que la serial recorre arreglos de 200,000 puntos (unos 3.2 MB para x e y) que no caben en L2 y se leen desde L3. La parte atribuible a la localidad de caché es una explicación consistente con los datos, pero no se midió con contadores de hardware.
+## Reproducibilidad y archivos
 
-Los hilos aportan un factor adicional de 1.5 a 3.5 (tabla de speedup contra 1 hilo). Es modesto porque la máquina tiene 4 cores físicos: pasar de 4 a 8 o 16 hilos casi no mejora y en varios casos empeora, lo que es esperable cuando los hilos adicionales son hyperthreads que comparten unidades de ejecución y caché con otro hilo, o simplemente están sobresuscritos. Con malla, k = 16 y 4 hilos, el speedup de 2.43 corresponde, según la ley de Amdahl con 4 cores, a una fracción paralelizable de alrededor de 78 % y un máximo teórico de unas 4.7 veces. El resto es trabajo que no escala: cálculo de los límites de la caja, reserva de memoria, la fracción de construcción de regiones y el desbalance entre regiones (los clusters concentran los puntos en pocas celdas).
+Las 3,920 mediciones individuales están en `results/experimentos.csv`, con columnas `version,k,n,hilos,iteracion,tiempo_s,n_ruido`. Las medias se obtienen agrupando por `version,k,n,hilos`; las imágenes están en `results/speedup_vs_n.png`, `results/speedup_vs_hilos.png` y `results/franjas_vs_malla.png`. Los CSV de puntos y etiquetas en `data/` están disponibles localmente, pero no se incluyen en Git por `.gitignore`; pueden regenerarse con las instrucciones de `README.md`.
 
-### 4.3 Efecto de k
+## Uso de IA en esta evaluación
 
-El mejor k es intermedio y depende de la versión: 16 para franjas y 32 para malla. Subir k acorta las listas de candidatos, pero tiene dos costos: construir las regiones cuesta O(k·n) en total (cada región recorre los n puntos para reunir sus candidatos) y el halo crece en proporción al número de regiones. Con k = 64 ambos costos pesan: franjas cae a 2.46 con 1 hilo y malla baja de 6.94 a 5.83.
-
-Con k = 2 solo hay 2 regiones, por lo que más de 2 hilos no pueden acelerar el cálculo por región; por eso 4, 8 y 16 hilos dan resultados parecidos (3.37, 3.14 y 3.14 en franjas).
-
-### 4.4 ¿Por qué una versión paralela fue mejor que la otra?
-
-Las dos versiones usan el mismo algoritmo, la misma estrategia de consistencia y los mismos kernels; solo cambia la forma de las regiones. Esa forma determina cuánto halo debe copiarse y recorrerse. Si el dominio es aproximadamente un cuadrado unitario y ε = 0.03, la lista de candidatos de una región (propios más halo) es, de forma aproximada, este múltiplo de sus puntos propios, sin considerar efectos de borde ni que la densidad no es uniforme:
-
-| k | franjas | malla |
-|---|---|---|
-| 2 | 1.1 | 1.1 |
-| 4 | 1.2 | 1.3 |
-| 8 | 1.5 | 1.4 |
-| 16 | 2.0 | 1.5 |
-| 32 | 2.9 | 1.8 |
-| 64 | 4.8 | 2.2 |
-
-(Para franjas es (w + 2ε)/w con w = 1/k; para la malla, el producto de ese cociente en cada eje.)
-
-Una franja de k = 64 mide apenas ≈ 0.016 de ancho, menos que ε = 0.03: su halo es más grande que la propia franja y cada región compara contra unas cinco veces más puntos de los que le pertenecen. En la malla 8×8 el factor es de unas dos veces. Por eso, a partir de k = 16 malla es mejor o igual que franjas y la ventaja crece con k (k = 64 con 1 hilo: 5.83 contra 2.46; k = 32 con 4 hilos: 17.13 contra 11.70). Con k = 8 son equivalentes (4.73 contra 4.74 con 1 hilo), que coincide con que el factor de halo es casi igual para ambas.
-
-Franjas escala algo mejor con los hilos en k = 64 (3.54 contra 2.89 al pasar de 1 a 16 hilos), pero porque parte de una base mucho más lenta: tiene más trabajo repetido en los halos que sí se puede repartir. En tiempo absoluto, malla sigue siendo más rápida.
-
-### 4.5 Variabilidad de las medidas
-
-Para k = 2, `franjas` y `malla` producen exactamente la misma partición (2×1), y sin embargo con 1 hilo se midió 1.90 en una y 1.35 en la otra. Esa diferencia es variabilidad de la medición (el experimento corre en WSL2 sobre una laptop), no de las versiones, y da una idea del margen de error: diferencias menores a ~30–40 % entre configuraciones no son concluyentes. Las conclusiones de las secciones anteriores se apoyan en diferencias mayores (por ejemplo, 5.83 contra 2.46 o 17.13 contra 11.70).
-
-## 5. Limitaciones
-
-- Un solo equipo, de 4 cores físicos, ejecutado sobre WSL2; el overhead de WSL2 y la gestión de energía de una laptop pueden afectar los tiempos.
-- Una sola semilla de datos (`random_state = 11`) y una distribución fija (4 clusters gaussianos); los tiempos dependen de la densidad y de cuántos puntos son ruido.
-- Se reportan medias de 10 iteraciones sin calentamiento previo; una iteración atípica puede mover la media (por ejemplo, en la serial con 20,000 puntos hay una iteración de 0.0656 s contra ~0.027 s en las demás).
-- Las explicaciones de caché y de Amdahl son interpretaciones consistentes con los datos, no mediciones directas con contadores de hardware.
-
-## 6. Uso responsable y ético de IA generativa
-
-Se usó Claude (Anthropic) como asistente para: interpretar el enunciado, proponer el diseño de las dos versiones paralelas (franjas y malla con halo de ancho ε y dos fases), escribir y revisar `src/dbscan.cpp` y `scripts/graficas.py`, y redactar un borrador de estos documentos a partir de los resultados del experimento.
-
-Qué se verificó por cuenta propia: el código se compiló y ejecutó; la corrección se comprobó comparando las tres versiones entre sí y contra `sklearn.cluster.DBSCAN`; el experimento completo se ejecutó en mi equipo y las tablas y gráficas de este documento salen de esos datos. El autor es responsable del contenido entregado y puede explicar cada parte del programa.
-
-## 7. Archivos
-
-- `results/experimentos.csv`: datos crudos. Columnas: `version, k, n, hilos, iteracion, tiempo_s, n_ruido`.
-- `results/speedup_vs_n.png`, `results/speedup_vs_hilos.png`, `results/franjas_vs_malla.png`.
+La documentación original declara el uso de Claude (Anthropic) para apoyar el diseño y la redacción inicial del proyecto. Para la evaluación de esta página se utilizó Codex (OpenAI) para generar los ocho CSV de entrada con los parámetros de la libreta, ejecutar las 3,920 corridas con el programa existente, comprobar que el experimento terminara sin diferencias respecto a la versión serial y verificar el contenido de los CSV de salida. Codex también ejecutó el script de gráficas, calculó las medias y los speedups a partir de `results/experimentos.csv`, y actualizó las tablas y el análisis de este documento. Los tiempos y resultados numéricos proceden de la ejecución en el equipo descrito arriba.
