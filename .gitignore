@@ -1,0 +1,5 @@
+build/
+data/*.csv
+.vscode/
+.venv/
+__pycache__/
