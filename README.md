@@ -1,12 +1,12 @@
 # DBSCAN paralelo con OpenMP
 
-Proyecto Apertura — Cómputo Paralelo y en la Nube (ITAM). Detección de ruido (outliers) con DBSCAN en C++: una versión serial y dos versiones paralelas con OpenMP que dividen el plano en `k` regiones (franjas y malla).
+Proyecto Apertura — Cómputo Paralelo y en la Nube (ITAM). Detección de ruido (outliers) con DBSCAN en C++: una versión serial, P1 paralela sobre todos los puntos y P2 paralela con el plano dividido en `k` celdas.
 
 ## Estructura
 
 ```
-src/dbscan.cpp                       serial + franjas + malla + CLI + experimento (--bench)
-scripts/graficas.py                  gráficas de speedup y resumen
+src/dbscan.cpp                       serial + P1 + P2 (malla) + CLI + experimento (--bench)
+scripts/graficas.py                  gráficas de tiempos, aceleración y resumen
 data/DBSCAN_noise.ipynb              libreta del curso (genera y visualiza)
 results/experimentos.csv             datos crudos (10 iteraciones por configuración)
 results/*.png                        gráficas
@@ -41,8 +41,10 @@ PY
 Una corrida (escribe `data/<N>_results.csv`, que la libreta visualiza):
 
 ```
-build/dbscan data/20000_data.csv <serial|franjas|malla> [k] [hilos]
+build/dbscan data/20000_data.csv <serial|p1|malla> [k] [hilos]
 ```
+
+`serial` procesa todos los puntos con un hilo; `p1` procesa todos los puntos en paralelo; `malla` divide el plano en `k` regiones y las procesa en paralelo. `k` solo se usa en `malla`; use potencias de 2 para obtener exactamente `k` regiones. El experimento usa `k = 2, 4, 8, 16, 32, 64`.
 
 Etiquetas de salida: `0` ruido, `1` core, `2` core de segundo orden.
 
@@ -53,4 +55,4 @@ build/dbscan --bench data results/experimentos.csv
 python3 scripts/graficas.py
 ```
 
-El experimento verifica en cada configuración que el resultado sea idéntico al de la versión serial y se detiene si no lo es.
+El experimento verifica en cada configuración que el resultado sea idéntico al de la versión serial y se detiene si no lo es. Genera mediciones para P1 y P2; el script produce cuatro gráficas: tiempo según `N`, aceleración según hilos, efecto de `k` en P2 y comparación directa entre P1 y P2.

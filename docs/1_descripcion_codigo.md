@@ -23,30 +23,36 @@ La distancia euclidiana d = √((x₂−x₁)² + (y₂−y₁)²) se evalúa co
 |---|---|
 | `marcar_cores` | Fase 1: decide si cada punto propio de una región es core. |
 | `etiquetar` | Fase 2: asigna core, core de 2.º orden o ruido. |
-| `dbscan_serial` | P1: una sola región con toda la matriz. |
+| `dbscan_serial` | Procesa todos los puntos en una sola región, en forma serial. |
+| `dbscan_p1` | Procesa todos los puntos en una sola región, repartiendo los puntos entre hilos. |
 | `dbscan_particionado` | Núcleo de P2: divide el plano en `gx × gy` regiones, las procesa en paralelo y mantiene la consistencia. |
-| `dbscan_franjas` / `dbscan_malla` | Las dos versiones paralelas: solo cambian la forma de la partición. |
+| `dbscan_malla` | Configura la malla de `k` regiones usada por P2. |
 | `construir_region` | Reúne los puntos de una celda y su halo. |
 | `bench` | Experimento completo (sección 6). |
 
-Las tres versiones comparten exactamente los mismos kernels (`marcar_cores` y `etiquetar`), de modo que la comparación de tiempos mide la estrategia de partición y no diferencias de implementación.
+Las tres versiones comparten los mismos kernels (`marcar_cores` y `etiquetar`). En P1, los bucles por punto de ambos kernels se ejecutan con OpenMP; en la serial y dentro de cada región de P2, esos bucles son seriales.
 
-## 3. Versión serial (P1)
+## 3. Versión serial
 
 Construye una única región que contiene todos los puntos, ejecuta la fase 1 y luego la fase 2. En la fase 1 el conteo de vecinos de un punto se detiene al llegar a `min_samples` (un punto core no necesita más). En la fase 2 la búsqueda de un core vecino se detiene en cuanto aparece uno. Un punto de ruido sí recorre todos los puntos en ambas fases.
 
-## 4. Versiones paralelas (P2)
+## 4. P1: versión paralela sin partición
 
-### 4.1 Partición
+P1 construye una única región con todos los puntos, como la versión serial. La fase 1 reparte los puntos entre hilos con `#pragma omp parallel for schedule(dynamic, 64)` para determinar cuáles son core. Al terminar ese bucle, todos los valores de `es_core` están disponibles. La fase 2 reparte de nuevo los puntos para asignar las etiquetas. Cada hilo escribe una posición distinta de los arreglos de resultados, de acuerdo con el índice del punto.
 
-Con `k` regiones, el plano (caja que contiene a los puntos) se divide en una malla de `gx × gy` celdas con `gx·gy = k`:
+P1 compara cada punto con candidatos de toda la entrada; no crea celdas ni halos. Esto permite medir el beneficio de OpenMP sobre el mismo trabajo de búsqueda que realiza la serial.
 
-- **Franjas:** `gx = k`, `gy = 1` (k tiras verticales).
-- **Malla:** celdas casi cuadradas, con `gx` la menor potencia de 2 tal que `gx² ≥ k` y `gy = k/gx`. Para k ∈ {2, 4, 8, 16, 32, 64} resultan 2×1, 2×2, 4×2, 4×4, 8×4 y 8×8.
+## 5. P2: versión paralela con partición
+
+### 5.1 Partición
+
+Con los valores `k = {2, 4, 8, 16, 32, 64}` usados en el experimento, el plano (caja que contiene a los puntos) se divide en una malla de `gx × gy` celdas con `gx·gy = k`. Se elige `gx` como la menor potencia de 2 tal que `gx² ≥ k` y `gy = k/gx`. Las dimensiones resultantes son 2×1, 2×2, 4×2, 4×4, 8×4 y 8×8, respectivamente.
+
+La implementación actual de la malla está diseñada para esos valores de `k`, que son potencias de 2.
 
 Cada punto pertenece a una sola celda (su dueño), calculada en un `parallel for`.
 
-### 4.2 ¿Cómo unir los resultados para mantener consistencia?
+### 5.2 ¿Cómo unir los resultados para mantener consistencia?
 
 El problema de dividir la matriz es que un punto cerca de una frontera tiene vecinos en la región contigua. Se resuelve con dos mecanismos:
 
@@ -60,31 +66,32 @@ El problema de dividir la matriz es que un punto cerca de una frontera tiene vec
 
 No se necesita una etapa de "unión" posterior: cada punto se etiqueta una sola vez, por su dueño, con información completa.
 
-### 4.3 Uso de OpenMP
+### 5.3 Uso de OpenMP
 
 - `#pragma omp parallel for` para calcular la celda de cada punto.
 - `#pragma omp parallel for schedule(dynamic, 1)` sobre las regiones, en ambas fases. Las regiones tienen costos muy distintos (los clusters son densos y el resto casi está vacío), por lo que el reparto dinámico equilibra la carga mejor que uno estático.
 - **Sin condiciones de carrera:** en la fase 1 cada elemento de `es_core` lo escribe un solo hilo (su dueño) y en la fase 2 se lee, junto con `etiqueta`, que también tiene un solo escritor por elemento. Se usan arreglos separados (`es_core` y `etiqueta`) para que en la fase 2 nadie lea una posición que otro hilo esté escribiendo.
 - Cada región es un objeto independiente (`Region`) con copias contiguas de sus coordenadas, lo que mejora la localidad de caché.
 
-### 4.4 Costos de la partición
+### 5.4 Costos de la partición
 
-Construir la región de una celda recorre los n puntos, así que construir todas cuesta O(k·n) (repartido entre los hilos). A cambio, cada región compara contra una lista de candidatos mucho más corta que n. Por eso aumentar `k` primero ayuda y después deja de ayudar (ver el documento de evaluación). El tamaño del halo depende de la geometría: franjas angostas tienen proporcionalmente mucho más halo que celdas casi cuadradas.
+Construir la región de una celda recorre los n puntos, así que construir todas cuesta O(k·n) (repartido entre los hilos). A cambio, cada región compara contra una lista de candidatos mucho más corta que n. Por eso aumentar `k` primero ayuda y después deja de ayudar (ver el documento de evaluación). Al crecer `k`, también aumenta el trabajo de construir regiones y copiar puntos del halo.
 
-## 5. Entrada y salida
+## 6. Entrada y salida
 
 - **Entrada:** `.csv` con dos columnas `x,y` sin encabezado, generado con la libreta `DBSCAN_noise.ipynb`.
 - **Salida:** `<N>_results.csv` con columnas `x,y,etiqueta`, en la misma carpeta que la entrada, que se visualiza con la misma libreta.
 
-## 6. Verificación y experimento
+## 7. Verificación y experimento
 
-- El modo `--bench` recorre todas las configuraciones y registra el tiempo de cada iteración en `results/experimentos.csv`. En cada configuración compara las etiquetas con las de la versión serial y se detiene si difieren. En el experimento completo no se detectó ninguna diferencia.
-- Además se comparó el conjunto de puntos de ruido contra `sklearn.cluster.DBSCAN` (ε = 0.03, `min_samples` = 10) con 4,000 y 20,000 puntos: no hubo diferencias.
+- El modo `--bench` mide la serial, P1 con un solo valor `k = 1` y P2 con seis valores de `k`. Registra cada iteración en `results/experimentos.csv` y compara las etiquetas con las de la versión serial. Las 2,320 corridas del experimento actualizado terminaron sin diferencias.
+- En una verificación anterior se comparó el conjunto de puntos de ruido contra `sklearn.cluster.DBSCAN` (ε = 0.03, `min_samples` = 10) con 4,000 y 20,000 puntos: no hubo diferencias.
 
-## 7. Compilación y uso
+## 8. Compilación y uso
 
 ```
 make
+build/dbscan data/4000_data.csv p1 1 8
 build/dbscan data/4000_data.csv malla 4 8
 build/dbscan --bench data results/experimentos.csv
 ```
