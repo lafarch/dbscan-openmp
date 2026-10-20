@@ -1,7 +1,7 @@
-// DBSCAN para detección de ruido: versión serial y dos versiones paralelas (OpenMP).
+// DBSCAN para detección de ruido: versión serial, P1 y P2 paralelas (OpenMP).
 //
 // Uso:
-//   build/dbscan <entrada.csv> <serial|franjas|malla> [k] [hilos]   -> escribe <N>_results.csv
+//   build/dbscan <entrada.csv> <serial|p1|malla> [k] [hilos]   -> escribe <N>_results.csv
 //   build/dbscan --bench <carpeta_data> <salida.csv>                 -> experimento completo
 
 #include <omp.h>
@@ -21,7 +21,7 @@ constexpr double MARGEN = EPS + 1e-9;        // ancho del halo (con holgura num�
 constexpr int MIN_SAMPLES = 10;              // cuenta el propio punto (igual que sklearn)
 
 enum Etiqueta : unsigned char { RUIDO = 0, CORE = 1, CORE_2 = 2 };
-enum class Version { Serial, Franjas, Malla };
+enum class Version { Serial, P1, Malla };
 
 struct Puntos {
     std::vector<double> x, y;
@@ -37,43 +37,64 @@ struct Region {
 
 // ------------------------------------------------------------------- kernels
 // Fase 1: un punto propio es core si tiene >= MIN_SAMPLES puntos a distancia <= ε.
-static void marcar_cores(const Region& r, std::vector<char>& es_core) {
+static void marcar_cores(const Region& r, std::vector<char>& es_core, bool paralelo = false) {
     const int m = static_cast<int>(r.id.size());
-    for (int i = 0; i < r.n_propios; ++i) {
+    auto marcar = [&](int i) {
         int vecinos = 0;
         for (int j = 0; j < m && vecinos < MIN_SAMPLES; ++j) {
             const double dx = r.x[i] - r.x[j], dy = r.y[i] - r.y[j];
             vecinos += (dx * dx + dy * dy <= EPS2);
         }
         es_core[r.id[i]] = (vecinos >= MIN_SAMPLES);
+    };
+    if (paralelo) {
+        #pragma omp parallel for schedule(dynamic, 64)
+        for (int i = 0; i < r.n_propios; ++i) marcar(i);
+    } else {
+        for (int i = 0; i < r.n_propios; ++i) marcar(i);
     }
 }
 
 // Fase 2: un punto no core es core de 2.º orden si tiene un core a distancia <= ε; si no, es ruido.
 static void etiquetar(const Region& r, const std::vector<char>& es_core,
-                      std::vector<unsigned char>& etiqueta) {
+                      std::vector<unsigned char>& etiqueta, bool paralelo = false) {
     const int m = static_cast<int>(r.id.size());
-    for (int i = 0; i < r.n_propios; ++i) {
+    auto etiquetar_punto = [&](int i) {
         const int g = r.id[i];
-        if (es_core[g]) { etiqueta[g] = CORE; continue; }
+        if (es_core[g]) { etiqueta[g] = CORE; return; }
         etiqueta[g] = RUIDO;
         for (int j = 0; j < m; ++j) {
             const double dx = r.x[i] - r.x[j], dy = r.y[i] - r.y[j];
             if (dx * dx + dy * dy <= EPS2 && es_core[r.id[j]]) { etiqueta[g] = CORE_2; break; }
         }
+    };
+    if (paralelo) {
+        #pragma omp parallel for schedule(dynamic, 64)
+        for (int i = 0; i < r.n_propios; ++i) etiquetar_punto(i);
+    } else {
+        for (int i = 0; i < r.n_propios; ++i) etiquetar_punto(i);
     }
 }
 
-// -------------------------------------------------------------------- serial
-// P1: toda la matriz es una sola región indivisible.
-static std::vector<unsigned char> dbscan_serial(const Puntos& p) {
+// -------------------------------------------------------- región completa
+// La versión serial y P1 usan todos los puntos como una sola región.
+static std::vector<unsigned char> dbscan_completo(const Puntos& p, bool paralelo) {
     Region todo{p.x, p.y, std::vector<int>(p.n()), p.n()};
     std::iota(todo.id.begin(), todo.id.end(), 0);
     std::vector<char> es_core(p.n());
     std::vector<unsigned char> etiqueta(p.n());
-    marcar_cores(todo, es_core);
-    etiquetar(todo, es_core, etiqueta);
+    marcar_cores(todo, es_core, paralelo);
+    etiquetar(todo, es_core, etiqueta, paralelo);
     return etiqueta;
+}
+
+static std::vector<unsigned char> dbscan_serial(const Puntos& p) {
+    return dbscan_completo(p, false);
+}
+
+// P1: toda la región, con los puntos repartidos entre hilos en ambas fases.
+static std::vector<unsigned char> dbscan_p1(const Puntos& p) {
+    return dbscan_completo(p, true);
 }
 
 // ------------------------------------------------------------------ paralelo
@@ -138,12 +159,7 @@ static std::vector<unsigned char> dbscan_particionado(const Puntos& p, int gx, i
     return etiqueta;
 }
 
-// P2a: k franjas verticales.
-static std::vector<unsigned char> dbscan_franjas(const Puntos& p, int k) {
-    return dbscan_particionado(p, k, 1);
-}
-
-// P2b: k celdas casi cuadradas (k potencia de 2: 2x1, 2x2, 4x2, 4x4, 8x4, 8x8).
+// P2: k celdas casi cuadradas (k potencia de 2: 2x1, 2x2, 4x2, 4x4, 8x4, 8x8).
 static std::vector<unsigned char> dbscan_malla(const Puntos& p, int k) {
     int gx = 1;
     while (gx * gx < k) gx *= 2;
@@ -152,7 +168,7 @@ static std::vector<unsigned char> dbscan_malla(const Puntos& p, int k) {
 
 static std::vector<unsigned char> ejecutar(Version v, const Puntos& p, int k) {
     switch (v) {
-        case Version::Franjas: return dbscan_franjas(p, k);
+        case Version::P1:     return dbscan_p1(p);
         case Version::Malla:   return dbscan_malla(p, k);
         default:               return dbscan_serial(p);
     }
@@ -200,8 +216,6 @@ static int bench(const std::string& carpeta, const std::string& salida) {
 
     std::ofstream out(salida);
     out << "version,k,n,hilos,iteracion,tiempo_s,n_ruido\n";
-    const std::pair<const char*, Version> versiones[] = {{"franjas", Version::Franjas},
-                                                          {"malla", Version::Malla}};
     for (int n : tamanos) {
         const Puntos p = leer_csv(carpeta + "/" + std::to_string(n) + "_data.csv");
         std::cerr << "N = " << n << "\n";
@@ -222,9 +236,9 @@ static int bench(const std::string& carpeta, const std::string& salida) {
         };
 
         medir("serial", Version::Serial, 1, 1);
-        for (const auto& [nombre, v] : versiones)
-            for (int k : ks)
-                for (int h : hilos) medir(nombre, v, k, h);
+        for (int h : hilos) medir("p1", Version::P1, 1, h);
+        for (int k : ks)
+            for (int h : hilos) medir("malla", Version::Malla, k, h);
     }
     return 0;
 }
@@ -233,12 +247,16 @@ static int bench(const std::string& carpeta, const std::string& salida) {
 int main(int argc, char** argv) {
     if (argc == 4 && std::string(argv[1]) == "--bench") return bench(argv[2], argv[3]);
     if (argc < 3) {
-        std::cerr << "Uso: " << argv[0] << " <entrada.csv> <serial|franjas|malla> [k] [hilos]\n"
+        std::cerr << "Uso: " << argv[0] << " <entrada.csv> <serial|p1|malla> [k] [hilos]\n"
                   << "     " << argv[0] << " --bench <carpeta_data> <salida.csv>\n";
         return 1;
     }
     const std::string v = argv[2];
-    const Version version = v == "franjas" ? Version::Franjas : v == "malla" ? Version::Malla : Version::Serial;
+    if (v != "serial" && v != "p1" && v != "malla") {
+        std::cerr << "Versión desconocida: " << v << "\n";
+        return 1;
+    }
+    const Version version = v == "p1" ? Version::P1 : v == "malla" ? Version::Malla : Version::Serial;
     const int k = argc > 3 ? std::stoi(argv[3]) : 4;
     omp_set_num_threads(argc > 4 ? std::stoi(argv[4]) : omp_get_num_procs());
 
