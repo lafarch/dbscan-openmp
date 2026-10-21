@@ -5,7 +5,7 @@ Proyecto Apertura — Cómputo Paralelo y en la Nube (ITAM). Detección de ruido
 ## Estructura
 
 ```
-src/dbscan.cpp                       serial + P1 + P2 (malla) + CLI + experimento (--bench)
+src/dbscan.cpp                       serial + P1 + P2 (malla) + experimento (--bench)
 scripts/graficas.py                  gráficas de tiempos, aceleración y resumen
 data/DBSCAN_noise.ipynb              libreta del curso (genera y visualiza)
 results/experimentos.csv             datos crudos (10 iteraciones por configuración)
