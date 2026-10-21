@@ -55,11 +55,19 @@ Para comparar las versiones con la misma cantidad de hilos, la siguiente tabla m
 
 ![Tiempo de ejecución según el número de puntos: serial, P1 y P2](../results/tiempo_vs_n.png)
 
+**Tiempo según `N`:** compara la serial con P1 y P2 usando 16 hilos; P2 usa `k = 64`. El tiempo crece al aumentar los puntos, pero P2 se mantiene por debajo de P1 y de la serial. El eje vertical es logarítmico.
+
 ![Aceleración de P1 y P2 según el número de hilos](../results/speedup_vs_hilos.png)
+
+**Aceleración según hilos:** para `N = 200,000`, muestra cuántas veces es más rápida cada versión que la serial. P2 con `k = 64` obtiene mayor aceleración en todos los valores de hilos; en ambas versiones, usar 32 hilos no mejora el resultado de 16.
 
 ![Tiempo de P2 según el número de regiones](../results/tiempo_vs_k_p2.png)
 
+**Efecto de `k`:** para `N = 200,000`, dividir el plano en más regiones reduce el tiempo de P2 en general. La mejora se vuelve pequeña entre `k = 32` y `k = 64`; con 32 hilos, el tiempo incluso aumenta ligeramente.
+
 ![Relación de tiempos entre P1 y P2](../results/p1_vs_p2.png)
+
+**Comparación P1/P2:** cada curva divide el tiempo de P1 entre el de P2 con `k = 64`, usando el mismo `N` y número de hilos. Todos los valores superan 1, así que P2 fue más rápida en todas esas comparaciones.
 
 ## Interpretación y límites
 

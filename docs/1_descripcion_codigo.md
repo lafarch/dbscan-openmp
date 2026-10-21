@@ -95,5 +95,3 @@ build/dbscan data/4000_data.csv p1 1 8
 build/dbscan data/4000_data.csv malla 4 8
 build/dbscan --bench data results/experimentos.csv
 ```
-
-Se compila con `g++ -O3 -march=native -std=c++17 -fopenmp`.
