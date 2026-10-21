@@ -57,7 +57,7 @@ static void marcar_cores(const Region& r, std::vector<char>& es_core, bool paral
 
 // Fase 2: un punto no core es core de 2.º orden si tiene un core a distancia <= ε; si no, es ruido.
 static void etiquetar(const Region& r, const std::vector<char>& es_core,
-                      std::vector<unsigned char>& etiqueta, bool paralelo = false) {
+                    std::vector<unsigned char>& etiqueta, bool paralelo = false) {
     const int m = static_cast<int>(r.id.size());
     auto etiquetar_punto = [&](int i) {
         const int g = r.id[i];
@@ -248,7 +248,7 @@ int main(int argc, char** argv) {
     if (argc == 4 && std::string(argv[1]) == "--bench") return bench(argv[2], argv[3]);
     if (argc < 3) {
         std::cerr << "Uso: " << argv[0] << " <entrada.csv> <serial|p1|malla> [k] [hilos]\n"
-                  << "     " << argv[0] << " --bench <carpeta_data> <salida.csv>\n";
+                << "     " << argv[0] << " --bench <carpeta_data> <salida.csv>\n";
         return 1;
     }
     const std::string v = argv[2];
